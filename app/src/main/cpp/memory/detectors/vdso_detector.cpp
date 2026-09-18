@@ -25,14 +25,47 @@ namespace duckdetector::memory {
     VdsoSignals detect_vdso_anomalies(const std::vector<MapEntry> &maps) {
         VdsoSignals signals;
         std::vector<MapEntry> vdso_entries;
+        std::vector<MapEntry> sigpage_entries;
         for (const MapEntry &entry: maps) {
             if (entry.path == "[vdso]") {
                 vdso_entries.push_back(entry);
+            } else if (entry.path == "[sigpage]") {
+                sigpage_entries.push_back(entry);
             }
         }
 
         const auto auxv_base = static_cast<std::uintptr_t>(::getauxval(AT_SYSINFO_EHDR));
+        // Stock ARM32 processes on some arm64 kernels (e.g. Redmi) map exactly one
+        // [sigpage] and no compat [vdso], with AT_SYSINFO_EHDR left unset. That is
+        // the kernel signal trampoline page, not a remapped vDSO. Zero auxv is not
+        // a usable base address, so the fallback never compares against it.
+        const bool arm32_sigpage_fallback =
+#if defined(__arm__)
+                vdso_entries.empty() && sigpage_entries.size() == 1U && auxv_base == 0;
+#else
+                false;
+#endif
         if (vdso_entries.size() != 1U) {
+            if (arm32_sigpage_fallback) {
+                const MapEntry &entry = sigpage_entries.front();
+                if (entry.writable) {
+                    signals.remapped = true;
+                    std::ostringstream detail;
+                    detail << "[sigpage] is writable at 0x" << std::hex << entry.start
+                           << "-0x" << entry.end;
+                    signals.findings.push_back(
+                            Finding{
+                                    .section = "VDSO",
+                                    .category = "VDSO",
+                                    .label = "Writable [sigpage] mapping",
+                                    .detail = detail.str(),
+                                    .severity = FindingSeverity::kHigh,
+                            }
+                    );
+                }
+                return signals;
+            }
+
             signals.remapped = true;
             std::ostringstream detail;
             detail << "Expected 1 [vdso] mapping but saw " << vdso_entries.size();
