@@ -25,6 +25,14 @@ namespace duckdetector::memory {
 
     VdsoSignals detect_vdso_anomalies(const std::vector<MapEntry> &maps);
 
+    // Evaluates maps against an already collected AT_SYSINFO_EHDR value.
+    // arm32_process is the compiled ABI, not a kernel or device guess.
+    VdsoSignals detect_vdso_anomalies(
+            const std::vector<MapEntry> &maps,
+            std::uintptr_t auxv_base,
+            bool arm32_process
+    );
+
 }  // namespace duckdetector::memory
 
 #endif  // DUCKDETECTOR_MEMORY_DETECTORS_VDSO_DETECTOR_H
